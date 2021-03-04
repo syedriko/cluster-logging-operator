@@ -2,6 +2,8 @@ package kafka
 
 import (
 	"fmt"
+	"io/ioutil"
+	"strconv"
 
 	"github.com/openshift/cluster-logging-operator/pkg/factory"
 	"github.com/openshift/cluster-logging-operator/pkg/k8shandler"
@@ -20,7 +22,7 @@ const (
 	kafkaBrokerProvider      = "openshift"
 	kafkaNodeReader          = "kafka-node-reader"
 	kafkaNodeReaderBinding   = "kafka-node-reader-binding"
-	kafkaInsidePort          = 9092
+	kafkaInsidePort          = 9093
 	kafkaOutsidePort         = 9094
 	kafkaJMXPort             = 5555
 )
@@ -150,7 +152,7 @@ func NewBrokerStatefuleSet(namespace string) *apps.StatefulSet {
 								},
 								{
 									Name:  "JMX_PORT",
-									Value: "5555",
+									Value: strconv.Itoa(kafkaJMXPort),
 								},
 							},
 							Ports: []v1.ContainerPort{
@@ -159,7 +161,7 @@ func NewBrokerStatefuleSet(namespace string) *apps.StatefulSet {
 									ContainerPort: kafkaInsidePort,
 								},
 								{
-									Name:          "outide",
+									Name:          "outside",
 									ContainerPort: kafkaOutsidePort,
 								},
 								{
@@ -205,6 +207,10 @@ func NewBrokerStatefuleSet(namespace string) *apps.StatefulSet {
 									MountPath: "/etc/kafka-configmap",
 								},
 								{
+									Name:      "brokercerts",
+									MountPath: "/etc/kafka-certs",
+								},
+								{
 									Name:      "config",
 									MountPath: "/etc/kafka",
 								},
@@ -231,6 +237,14 @@ func NewBrokerStatefuleSet(namespace string) *apps.StatefulSet {
 									LocalObjectReference: v1.LocalObjectReference{
 										Name: DeploymentName,
 									},
+								},
+							},
+						},
+						{
+							Name: "brokercerts",
+							VolumeSource: v1.VolumeSource{
+								Secret: &v1.SecretVolumeSource{
+									SecretName: DeploymentName,
 								},
 							},
 						},
@@ -262,8 +276,12 @@ func NewBrokerStatefuleSet(namespace string) *apps.StatefulSet {
 func NewBrokerService(namespace string) *v1.Service {
 	ports := []v1.ServicePort{
 		{
-			Name: "server",
-			Port: kafkaInsidePort,
+			Name: "plaintext",
+			Port: 9092,
+		},
+		{
+			Name: "ssl",
+			Port: 9093,
 		},
 	}
 	return factory.NewService(DeploymentName, namespace, kafkaBrokerComponent, ports)
@@ -313,7 +331,39 @@ func NewBrokerConfigMap(namespace string) *v1.ConfigMap {
 	data := map[string]string{
 		"init.sh":           initKafkaScript,
 		"server.properties": serverProperties,
+		"client.properties": clientProperties,
 		"log4j.properties":  log4jProperties,
 	}
 	return k8shandler.NewConfigMap(DeploymentName, namespace, data)
+}
+
+func NewBrokerSecret(namespace string) *v1.Secret {
+	server_pkcs12, err := ioutil.ReadFile("/home/syedriko/bz/1904380/pki_clo/server_root_ca/server_intermediate_ca/server.pkcs12")
+	if err != nil {
+		fmt.Printf("NewBrokerSecret %v\n", err)
+		return nil
+	}
+	server_ca_bundle_jks, err := ioutil.ReadFile("/home/syedriko/bz/1904380/pki_clo/server_root_ca/server_intermediate_ca/server_ca_bundle.jks")
+	if err != nil {
+		fmt.Printf("NewBrokerSecret %v\n", err)
+		return nil
+	}
+	server_ca_bundle_crt, err := ioutil.ReadFile("/home/syedriko/bz/1904380/pki_clo/server_root_ca/server_intermediate_ca/server_ca_bundle.crt")
+	if err != nil {
+		fmt.Printf("NewBrokerSecret %v\n", err)
+		return nil
+	}
+
+	data := map[string][]byte{
+		"server.pkcs12":        server_pkcs12,
+		"server_ca_bundle.jks": server_ca_bundle_jks,
+		"ca-bundle.crt":        server_ca_bundle_crt,
+	}
+
+	secret := k8shandler.NewSecret(
+		DeploymentName,
+		namespace,
+		data,
+	)
+	return secret
 }
