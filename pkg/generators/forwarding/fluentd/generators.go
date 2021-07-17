@@ -315,9 +315,10 @@ func (engine *ConfigGenerator) generateOutputLabelBlocks(outputs []logging.Outpu
 		default:
 			return nil, fmt.Errorf("Unknown output type: %v", output.Type)
 		}
+
 		var secret *corev1.Secret
 		if output.Secret != nil {
-			secret = secrets[output.Secret.Name]
+			secret = secrets[output.Name]
 		}
 		conf, err := newOutputLabelConf(engine.Template, engine.storeTemplate, output, secret, outputConf)
 		if err != nil {
